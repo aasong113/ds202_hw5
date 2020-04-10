@@ -1,0 +1,221 @@
+Title: Homework 5
+Author: Anthony Song 
+Github: aasong113
+
+
+## Liquor Sales in Iowa
+
+**Submission instructions**: Create a folder named `ds202_hw5`, and name the RMarkDown file including your solutions `hw5.Rmd` under this folder. For the submission, create a GitHub repository named `ds202_hw5` under your GitHub account, and push both `hw5.Rmd` and the knitted `hw5.html` before the deadline. I will assume you use the same GitHub username as for your HW4 submission. The latest version of your homework appearing on GitHub before the deadline is graded. *It is crucial to follow the exact folder structure and file names*, so that your homework can be reproduced and graded by an automated script. This homework is **due on April 10** by 11:59 pm.
+
+```{r}
+library(stringr)
+library(readxl)
+library(ggplot2)
+library(plyr)
+library(dplyr)
+library(magrittr)
+library(tidyr)
+```
+
+1. The complete dataset is too large. Download and import the alcohol sales data for Ames only: 
+
+  a. Go to https://data.iowa.gov/Sales-Distribution/2019-Iowa-Liquor-Sales/38x4-vs5h
+  b. Click Filter -- Filter -- Go advanced now
+  c. Add a New Filter Condition: City is Ames.
+  d. Export -- CSV -- Download
+  e. Use `readr::read_csv` to import.
+```{r}
+dat <- readr::read_csv('2019_Iowa_Liquor_Sales.csv')
+dat <- na.omit(dat, cols="Store Location")
+```
+
+2. Data cleaning: 
+  a. extract geographic latitude and longitude from the variable `Store Location`
+```{r}
+
+colnames(dat)[13] <- "Vendor_Number"
+colnames(dat)[8] <- "Store_Location"
+dat$Vendor_Number <- as.numeric(dat$Vendor_Number)
+```
+
+```{r}
+### removes POINT( )
+### For loop takes forever. Can use recursive?
+for(i in 1: length(dat$Store_Location)){
+  dat$Store_Location[i] <- substr(dat$Store_Location[i], 8,  nchar(dat$Store_Location[i])-1)
+}
+```
+
+```{r}
+# Splits Store Location by delimiter space in Store_Location.
+
+dat <- data.frame(dat,do.call(rbind,str_split(dat$Store_Location," ")))
+
+#Rename Columns 
+
+names(dat)[ncol(dat)-1] <- "Location_X"
+names(dat)[ncol(dat)] <- "Location_Y"
+```
+
+
+  b. make sure the variables are in the correct type, by converting incorrect variable types.
+```{r}
+#Covert to numeric. 
+dat$Vendor_Number <- as.numeric(dat$Vendor_Number)
+dat$Location_X <- as.numeric(levels(dat$Location_X))[dat$Location_X]
+dat$Location_Y <- as.numeric(levels(dat$Location_Y))[dat$Location_Y]
+```
+  
+  c. extract year, month and day from the variable `Date` as separate columns.
+
+```{r}
+
+# adds values to the end of the data set. 
+dat <- data.frame(dat,do.call(rbind,str_split(dat$Date,"/")))
+names(dat)[ncol(dat)-2] <- "Month"
+names(dat)[ncol(dat)-1] <- "Day"
+names(dat)[ncol(dat)] <- "Year"
+dat$Month <- as.numeric(levels(dat$Month))[dat$Month]
+dat$Year <- as.numeric(levels(dat$Year))[dat$Year]
+dat$Day <- as.numeric(levels(dat$Day))[dat$Day]
+```
+
+
+3. First overview:
+  a. Plot a scatterplot of lat and long of store locations. 
+
+###This plot has plots the store location in terms of longitude and latitude. It represents a map. Each color represents a different store. 
+```{r}
+#Remove duplicates
+dummy <- dat
+dummy <- dummy[!duplicated(dummy[c('Store.Name')]),]
+dummy %>%
+  ggplot(aes(x = Location_X, y = Location_Y, color = Store.Name))+geom_point() +labs(title = "Store Locations in Ames 2019", x = "Latitude", y = "Longitude")+theme(axis.text.x = element_text(angle = 60, hjust = 1))
+```
+
+  b. Provide a visual breakdown of the liquor category (by `Category Name`). Include volume sold in the breakdown.
+
+###This bar graph represents the top 10 liquor types sold in Ames 2019. It shows the amount in gallons of the top ten liquors sold in Ames 2019.
+```{r}  
+
+# get unique and top ten. 
+dummy2 <- dat
+dummy2 <- data.frame(table(dummy2$Category.Name))
+dummy2 <- dummy2[with(dummy2,order(-Freq)),]
+top10 <- dummy2[1:10,]
+
+# loop through and add all gallons together for corresponding liquor
+vec <- c()
+
+for( j in 1:nrow(top10)){
+  dummy3 <- dat
+  temp_df <- dummy3[dummy3$Category.Name == top10$Var1[j], ]
+  temp_val <- sum(temp_df$Volume.Sold..Liters.)
+  vec[j] <- temp_val
+  
+}
+top10$number_gallons <- vec
+
+ggplot(top10, aes(x=Var1, y=number_gallons, color = Var1)) + geom_bar(stat = "identity")+labs(x = "Type of Alcohol", y = "Volume Sold in Gallons",title = "Distribution of Top 10 Alcohols Sold in Ames 2019" )+theme(axis.text.x = element_text(angle = 60, hjust = 1))
+
+
+```
+
+4. Find the daily sales liquor sales in Ames in 2019. Summarize the number of sales, volume of liquor sold, and amount of money spent.
+
+###The temper data set summarizes the frequency, gallons sold, and sale dollars for each day that sales occurred in Ames 2019. Using the temper data set I summarized each of the three categories using a five number summary. 
+```{r}
+temper <- dat
+temper <- plyr::ddply(temper, .(Date), summarize, Frequency = length(Date), Gallons_Sold_Per_Day = sum(Volume.Sold..Gallons.), Sale_Dollars = sum(Sale..Dollars.))
+
+writeLines("5 Number Summary of the Frequency of Alcohol Sales Made for Each Sale Day of the Year 2019 in Ames")
+summary(temper$Frequency)
+
+writeLines("5 Number Summary of the Number of Gallons of Alcohol Sold for Each Sale Day of the Year 2019 in Ames")
+summary(temper$Gallons_Sold_Per_Day)
+
+writeLines("5 Number Summary of the Sale Dollars of Alcohol for Each Sale Day of the Year 2019 in Ames")
+summary(temper$Sale_Dollars)
+
+```
+
+5. Plot volume sold by day (use a scatterplot of volume by day and facet by month). Discover trends with the help of `geom_smooth`. Describe any patterns.
+
+###Using geom_smooth() we are able to identify some patterns. For the most part, the liquor sales by liter are relatively stable throughout the days of each month. But there are some particular trends that we are able to identify that relate to the cultural and economic occurences of that month and the corresponding days. When we look at April we see a drop in liquor purchased at the end of the month. This can be related to college students purchasing less alcohol as finals come around. The high fluctuation of February can be related to Valentines day and the month of being with your significant other. Single people may be more inclined to purchase more alcohol because they are looking to party and meet other single people. This can be seen by the spikes of alcohol purchases that occur during the weekend days of February. These February spikes can be identified when geom_smooth() is removed. Another notable spike/hump increase of alochol purchase is in the middle of the month of November. This occurs most likely because of Thanksgiving break. Over this break, a lot of alcohol is consumed as people have to hang out with their extended families. 
+```{r}
+
+# process data
+dates <- dat%>%
+  group_by(Date) %>%
+  summarise(Liters_purchased = sum(Volume.Sold..Gallons.)) %>%
+  separate(Date, sep="/", into = c("month", "day", "year"))
+
+dates$month <- as.numeric(dates$month)
+dates$day <- as.numeric(dates$day)
+dates$month <- month.abb[dates$month]
+
+ggplot(dates, aes(x = day, y = Liters_purchased))+ geom_point() + facet_wrap(~month)+labs(x = "Day of the Month", y = "Liters Purchased", title = "Liters of Alcohol Purchased by Day for Each Month in 2019")+ geom_smooth()
+
+```
+
+# Denotes home game. 
+Iowa State Football Schedule 2019
+# Aug. 31 — Northern Iowa
+Sept. 7 — OPEN
+# Sept. 14 — Iowa
+# Sept. 21 — Louisiana-Monroe
+Sept. 28 — at Baylor
+# Oct. 5 — Texas Christian
+Oct. 12 — at West Virginia
+Oct. 19 — at Texas Tech
+# Oct. 26 — Oklahoma State
+Nov. 2 — OPEN
+Nov. 9 — at Oklahoma
+# Nov. 16 — Texas
+# Nov. 23 — Kansas
+Nov. 30 — at Kansas State
+
+
+6. Find the dates for ISU football home games in Fall 2019. Can you see a pattern? 
+
+###Based on the 5 number summaries for each of the categories: Frequency of sales, number of gallons of alcohol sold and number of sale dollars for each of the days that occurred two days before an ISU football home gameday we can see that the these days had the largest median for all three categories we are interested in when compared to the five number summaries of all the sale days in 2019. As you can see by the 5 number summaries, all of the numbers in the five number summaries are substantially larger than the 5 number summary of the three categories that were produced from all of the days in 2019. The pattern that can be seen is that 2 days before an Iowa State home game day produces the largest frequency of alcohol sales, gallons of alcohol sold and sales dollars from alcohol sales. The mean amounts for each category leading up to game day is about twice as much as the mean amounts for the entire year. This shows that the city of Ames and Iowa State values drinking and college football gameday. 
+```{r}
+temper2 <- temper
+temper2$Date <- as.Date(temper2$Date, "%m/%d/%Y")
+
+# Two days before Northern Iowa Game
+Northern_Iowa <- subset(temper2, Date == "2019-08-29")
+
+# Two days before Iowa Game
+Iowa <- subset(temper2, Date == "2019-09-12")
+
+# Two days before Louisiana Monroe
+Louisiana_Monroe <- subset(temper2, Date == "2019-09-19")
+
+# Two days before Texas Christian
+Texas_Christian <- subset(temper2, Date == "2019-10-03")
+
+# Two days before Oklahoma State 
+OK_state <- subset(temper2, Date == "2019-10-24")
+
+# Two days before Texas
+Texas <- subset(temper2, Date == "2019-11-14")
+
+# Two days before Kansas
+Kansas <- subset(temper2, Date == "2019-11-21")
+
+gameday <- rbind(Northern_Iowa, Iowa, Louisiana_Monroe, Texas_Christian, OK_state, Texas, Kansas)
+
+writeLines("5 Number Summary of the Frequency of Alcohol Sales Made Two Days before Football GameDay")
+summary(gameday$Frequency)
+
+writeLines("5 Number Summary of the Gallons of Alcohol Sold Two Days before Football GameDay")
+summary(gameday$Gallons_Sold_Per_Day)
+
+writeLines("5 Number Summary of the Alcohol Sale Dollars Made Two Days before Football GameDay")
+summary(gameday$Sale_Dollars)
+```
+
+Checked: ASong*
+
+Note: your submission is supposed to be fully reproducible, i.e. the TA and I will 'knit' your submission in RStudio. 
